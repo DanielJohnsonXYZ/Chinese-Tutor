@@ -26,7 +26,7 @@ export default function ChatInterface() {
   useEffect(() => {
     const welcomeMessage: Message = {
       id: '1',
-      content: '你好！我是你的中文对话伙伴。我们可以用中文聊天，我会帮助你练习。有什么想聊的吗？',
+      content: 'Hello! I\'m your Chinese language tutor. I\'ll teach you Chinese using English explanations with characters and pinyin pronunciation. Let\'s start with a simple greeting: 你好 (nǐ hǎo) - hello! Can you try saying hello in Chinese?',
       isUser: false,
       timestamp: new Date()
     }
@@ -68,7 +68,7 @@ export default function ChatInterface() {
       console.error('Error sending message:', error)
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: '抱歉，出现了错误。请稍后再试。',
+        content: 'Sorry, there was an error connecting to the tutor. Please try again.',
         isUser: false,
         timestamp: new Date()
       }
@@ -81,7 +81,7 @@ export default function ChatInterface() {
   const clearChat = () => {
     const welcomeMessage: Message = {
       id: Date.now().toString(),
-      content: '你好！我是你的中文对话伙伴。我们可以用中文聊天，我会帮助你练习。有什么想聊的吗？',
+      content: 'Hello! I\'m your Chinese language tutor. I\'ll teach you Chinese using English explanations with characters and pinyin pronunciation. Let\'s start with a simple greeting: 你好 (nǐ hǎo) - hello! Can you try saying hello in Chinese?',
       isUser: false,
       timestamp: new Date()
     }
@@ -91,31 +91,31 @@ export default function ChatInterface() {
   const askForCorrection = () => {
     if (messages.length < 2) return
     
-    setInput('请纠正我刚才说的话')
+    setInput('Can you correct what I just said?')
   }
 
   const askForExplanation = () => {
     if (messages.length < 2) return
     
-    setInput('请用英文解释一下你刚才说的话')
+    setInput('Can you explain what you just taught me?')
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-lg h-[600px] flex flex-col">
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+    <div className="bg-gradient-to-br from-red-50 to-yellow-50 rounded-xl shadow-xl border border-red-100 h-[700px] flex flex-col">
+      <div className="flex-1 overflow-y-auto p-6 space-y-4">
         {messages.map((message) => (
           <div
             key={message.id}
             className={`flex ${message.isUser ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+              className={`max-w-xs lg:max-w-md px-4 py-3 rounded-xl shadow-sm ${
                 message.isUser
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-gray-100 text-gray-900'
+                  ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white'
+                  : 'bg-white text-gray-800 border border-gray-200'
               }`}
             >
-              <p className="text-sm">{message.content}</p>
+              <p className="text-sm leading-relaxed font-medium">{message.content}</p>
               <p className="text-xs mt-1 opacity-70">
                 {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </p>
@@ -124,11 +124,11 @@ export default function ChatInterface() {
         ))}
         {isLoading && (
           <div className="flex justify-start">
-            <div className="bg-gray-100 text-gray-900 max-w-xs lg:max-w-md px-4 py-2 rounded-lg">
+            <div className="bg-white border border-gray-200 text-gray-900 max-w-xs lg:max-w-md px-4 py-3 rounded-xl shadow-sm">
               <div className="flex space-x-1">
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                <div className="w-2 h-2 bg-red-400 rounded-full animate-bounce"></div>
+                <div className="w-2 h-2 bg-yellow-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                <div className="w-2 h-2 bg-red-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
               </div>
             </div>
           </div>
@@ -136,25 +136,25 @@ export default function ChatInterface() {
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="border-t p-4">
-        <div className="flex space-x-2 mb-3">
+      <div className="border-t border-red-100 bg-white/50 backdrop-blur-sm p-6">
+        <div className="flex flex-wrap gap-2 mb-4">
           <button
             onClick={askForCorrection}
-            className="px-3 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full hover:bg-yellow-200 transition-colors"
+            className="px-4 py-2 text-sm bg-gradient-to-r from-yellow-100 to-yellow-200 text-yellow-800 rounded-full hover:from-yellow-200 hover:to-yellow-300 transition-all duration-200 shadow-sm border border-yellow-300 font-medium"
           >
-            请纠正
+            ✏️ Correct Me
           </button>
           <button
             onClick={askForExplanation}
-            className="px-3 py-1 text-xs bg-green-100 text-green-800 rounded-full hover:bg-green-200 transition-colors"
+            className="px-4 py-2 text-sm bg-gradient-to-r from-green-100 to-green-200 text-green-800 rounded-full hover:from-green-200 hover:to-green-300 transition-all duration-200 shadow-sm border border-green-300 font-medium"
           >
-            请解释
+            💡 Explain
           </button>
           <button
             onClick={clearChat}
-            className="px-3 py-1 text-xs bg-red-100 text-red-800 rounded-full hover:bg-red-200 transition-colors"
+            className="px-4 py-2 text-sm bg-gradient-to-r from-red-100 to-red-200 text-red-800 rounded-full hover:from-red-200 hover:to-red-300 transition-all duration-200 shadow-sm border border-red-300 font-medium"
           >
-            清除对话
+            🔄 New Lesson
           </button>
         </div>
         
@@ -164,16 +164,16 @@ export default function ChatInterface() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-            placeholder="用中文聊天..."
-            className="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="Type your message or try Chinese..."
+            className="flex-1 border border-red-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-red-300 focus:border-red-300 bg-white shadow-sm font-medium"
             disabled={isLoading}
           />
           <button
             onClick={sendMessage}
             disabled={isLoading || !input.trim()}
-            className="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="bg-gradient-to-r from-red-500 to-red-600 text-white px-6 py-3 rounded-xl hover:from-red-600 hover:to-red-700 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-sm font-medium"
           >
-            发送
+            Send
           </button>
         </div>
       </div>
