@@ -25,12 +25,19 @@ const SYSTEM_PROMPT = `You are a friendly Chinese conversation tutor. Your role 
 
 Remember: The goal is natural conversation practice, not formal language lessons. Keep things flowing and fun!`
 
+interface Message {
+  id: string
+  content: string
+  isUser: boolean
+  timestamp: Date
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const { message, messages } = await request.json()
+    const { message, messages }: { message: string; messages: Message[] } = await request.json()
 
-    const conversationHistory = messages.map((msg: any) => ({
-      role: msg.isUser ? 'user' : 'assistant',
+    const conversationHistory = messages.map((msg: Message) => ({
+      role: msg.isUser ? 'user' as const : 'assistant' as const,
       content: msg.content
     }))
 
