@@ -9,11 +9,34 @@ interface Message {
   timestamp: Date
 }
 
+interface UserLevel {
+  level: 'beginner' | 'elementary' | 'intermediate' | 'advanced'
+  hskLevel: number
+  confidence: number
+  strengths: string[]
+  weaknesses: string[]
+  lastAssessed: Date
+}
+
+interface LessonRecommendation {
+  id: string
+  title: string
+  description: string
+  difficulty: number
+  topics: string[]
+  estimatedTime: number
+}
+
 export default function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [wordsLearned, setWordsLearned] = useState<Set<string>>(new Set())
+  const [userLevel, setUserLevel] = useState<UserLevel | null>(null)
+  const [recommendations, setRecommendations] = useState<LessonRecommendation[]>([])
+  const [showLevelAssessment, setShowLevelAssessment] = useState(false)
+  const [errorCount, setErrorCount] = useState(0)
+  const [successfulResponses, setSuccessfulResponses] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Audio synthesis for Chinese pronunciation
@@ -38,10 +61,166 @@ export default function ChatInterface() {
     }
   }
 
+  // Analyze user performance and detect level
+  const analyzeUserLevel = useCallback((userMessage: string, aiResponse: string) => {
+    const hasChineseInput = /[\u4e00-\u9fff]/.test(userMessage)
+    const complexityScore = calculateComplexity(userMessage)
+    const errorIndicators = detectErrors(aiResponse)
+    
+    if (errorIndicators > 0) {
+      setErrorCount(prev => prev + 1)
+    } else if (hasChineseInput) {
+      setSuccessfulResponses(prev => prev + 1)
+    }
+
+    // Update level based on accumulated data
+    updateUserLevel(complexityScore, errorIndicators)
+  }, [errorCount, successfulResponses])
+
+  const calculateComplexity = (text: string): number => {
+    const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length
+    const wordCount = text.split(/\s+/).length
+    const hasComplexStructure = /[，。！？；：]/.test(text)
+    
+    let score = 0
+    if (chineseChars > 0) score += Math.min(chineseChars / 5, 3) // Max 3 points for character count
+    if (wordCount > 10) score += 1
+    if (hasComplexStructure) score += 2
+    
+    return Math.min(score, 10) // Cap at 10
+  }
+
+  const detectErrors = (aiResponse: string): number => {
+    const errorKeywords = [
+      '正确的说法是', '应该说', '更好的表达是', 'correct way', 
+      'should be', 'mistake', 'error', '错误', '不对'
+    ]
+    return errorKeywords.filter(keyword => 
+      aiResponse.toLowerCase().includes(keyword.toLowerCase())
+    ).length
+  }
+
+  const updateUserLevel = useCallback((complexity: number, errors: number) => {
+    const totalInteractions = successfulResponses + errorCount
+    if (totalInteractions < 3) return // Need more data
+
+    const successRate = totalInteractions > 0 ? successfulResponses / totalInteractions : 0
+    const avgComplexity = complexity
+    
+    let level: UserLevel['level'] = 'beginner'
+    let hskLevel = 1
+    let confidence = 0.5
+
+    if (successRate > 0.8 && avgComplexity > 6) {
+      level = 'advanced'
+      hskLevel = 5
+      confidence = 0.9
+    } else if (successRate > 0.6 && avgComplexity > 4) {
+      level = 'intermediate'
+      hskLevel = 3
+      confidence = 0.8
+    } else if (successRate > 0.4 && avgComplexity > 2) {
+      level = 'elementary'
+      hskLevel = 2
+      confidence = 0.7
+    }
+
+    const newLevel: UserLevel = {
+      level,
+      hskLevel,
+      confidence,
+      strengths: determineStrengths(successRate, avgComplexity),
+      weaknesses: determineWeaknesses(errors, successRate),
+      lastAssessed: new Date()
+    }
+
+    setUserLevel(newLevel)
+    localStorage.setItem('chinese-tutor-level', JSON.stringify(newLevel))
+    generateRecommendations(newLevel)
+  }, [successfulResponses, errorCount, wordsLearned.size])
+
+  const determineStrengths = (successRate: number, complexity: number): string[] => {
+    const strengths = []
+    if (successRate > 0.7) strengths.push('Good comprehension')
+    if (complexity > 5) strengths.push('Complex sentence structure')
+    if (wordsLearned.size > 20) strengths.push('Growing vocabulary')
+    return strengths
+  }
+
+  const determineWeaknesses = (errors: number, successRate: number): string[] => {
+    const weaknesses = []
+    if (errors > 3) weaknesses.push('Grammar accuracy')
+    if (successRate < 0.5) weaknesses.push('Overall fluency')
+    if (wordsLearned.size < 10) weaknesses.push('Limited vocabulary')
+    return weaknesses
+  }
+
+  const generateRecommendations = (level: UserLevel) => {
+    const recommendations: LessonRecommendation[] = []
+    
+    if (level.level === 'beginner') {
+      recommendations.push(
+        {
+          id: '1',
+          title: 'Basic Greetings & Introductions',
+          description: 'Master essential everyday greetings and self-introduction',
+          difficulty: 1,
+          topics: ['greetings', 'introductions', 'basic phrases'],
+          estimatedTime: 15
+        },
+        {
+          id: '2', 
+          title: 'Numbers & Time',
+          description: 'Learn to count and tell time in Chinese',
+          difficulty: 2,
+          topics: ['numbers', 'time', 'dates'],
+          estimatedTime: 20
+        }
+      )
+    } else if (level.level === 'elementary') {
+      recommendations.push(
+        {
+          id: '3',
+          title: 'Daily Routines & Activities',
+          description: 'Express your daily activities and hobbies',
+          difficulty: 3,
+          topics: ['daily life', 'hobbies', 'verbs'],
+          estimatedTime: 25
+        }
+      )
+    } else if (level.level === 'intermediate') {
+      recommendations.push(
+        {
+          id: '4',
+          title: 'Complex Conversations',
+          description: 'Practice discussing opinions and abstract topics',
+          difficulty: 4,
+          topics: ['opinions', 'culture', 'advanced grammar'],
+          estimatedTime: 30
+        }
+      )
+    }
+
+    // Add weakness-specific recommendations
+    if (level.weaknesses.includes('Grammar accuracy')) {
+      recommendations.push({
+        id: 'grammar-1',
+        title: 'Grammar Pattern Practice',
+        description: 'Focus on correct sentence structures and common patterns',
+        difficulty: level.hskLevel,
+        topics: ['grammar', 'sentence patterns'],
+        estimatedTime: 20
+      })
+    }
+
+    setRecommendations(recommendations)
+  }
+
   // Load messages and progress from localStorage on mount
   useEffect(() => {
     const savedMessages = localStorage.getItem('chinese-tutor-messages')
     const savedWords = localStorage.getItem('chinese-tutor-words')
+    const savedLevel = localStorage.getItem('chinese-tutor-level')
     
     if (savedWords) {
       try {
@@ -50,6 +229,20 @@ export default function ChatInterface() {
       } catch (error) {
         console.error('Error loading saved words:', error)
       }
+    }
+
+    if (savedLevel) {
+      try {
+        const parsedLevel = JSON.parse(savedLevel)
+        parsedLevel.lastAssessed = new Date(parsedLevel.lastAssessed)
+        setUserLevel(parsedLevel)
+        generateRecommendations(parsedLevel)
+      } catch (error) {
+        console.error('Error loading saved level:', error)
+      }
+    } else {
+      // Show level assessment for new users
+      setTimeout(() => setShowLevelAssessment(true), 3000)
     }
     
     if (savedMessages) {
@@ -153,6 +346,10 @@ export default function ChatInterface() {
 
       // Track learned words from AI response
       trackLearnedWords(aiMessage.content)
+      
+      // Analyze user level based on conversation
+      analyzeUserLevel(userMessage.content, aiMessage.content)
+      
       setMessages(prev => [...prev, aiMessage])
     } catch (error) {
       console.error('Error sending message:', error)
@@ -168,7 +365,7 @@ export default function ChatInterface() {
     } finally {
       setIsLoading(false)
     }
-  }, [input, messages, isLoading])
+  }, [input, messages, isLoading, analyzeUserLevel])
 
   const clearChat = () => {
     const welcomeMessage: Message = {
@@ -196,6 +393,15 @@ export default function ChatInterface() {
 
   const startTopicLesson = (topic: string) => {
     setInput(`Let's practice Chinese conversation about ${topic}. Can you start us off with a simple scenario?`)
+  }
+
+  const startRecommendedLesson = (recommendation: LessonRecommendation) => {
+    setInput(`I'd like to practice "${recommendation.title}". ${recommendation.description} Can you help me with this?`)
+  }
+
+  const quickLevelAssessment = () => {
+    setShowLevelAssessment(false)
+    setInput("I'd like you to assess my Chinese level. Can you give me a few phrases to try so you can understand my current ability?")
   }
 
   // Keyboard shortcuts
@@ -232,15 +438,74 @@ export default function ChatInterface() {
 
   return (
     <div className="bg-gradient-to-br from-red-50 to-yellow-50 rounded-xl shadow-xl border border-red-100 h-[700px] sm:h-[600px] md:h-[700px] lg:h-[800px] flex flex-col">
-      {/* Progress indicator */}
+      {/* Level Assessment Modal */}
+      {showLevelAssessment && (
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 rounded-xl">
+          <div className="bg-white rounded-xl p-6 m-4 max-w-md shadow-2xl">
+            <h3 className="text-xl font-bold text-red-800 mb-3">Welcome to Your Chinese Learning Journey! 🎓</h3>
+            <p className="text-gray-700 mb-4">
+              I&apos;m your intelligent AI tutor. I&apos;ll automatically assess your Chinese level as we chat and provide personalized lessons just for you.
+            </p>
+            <div className="flex gap-2">
+              <button 
+                onClick={quickLevelAssessment}
+                className="flex-1 bg-gradient-to-r from-red-500 to-red-600 text-white px-4 py-2 rounded-lg font-medium hover:from-red-600 hover:to-red-700"
+              >
+                Start Assessment
+              </button>
+              <button 
+                onClick={() => setShowLevelAssessment(false)}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                Skip
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Progress and Level indicator */}
       <div className="px-4 sm:px-6 py-3 border-b border-red-100 bg-gradient-to-r from-red-100/50 to-yellow-100/50">
         <div className="flex items-center justify-between text-sm">
-          <span className="text-red-800 font-medium">Chinese Vocabulary Progress</span>
-          <span className="bg-red-200 px-2 py-1 rounded-full text-red-800 font-medium">
-            {wordsLearned.size} words learned
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-red-800 font-medium">Progress</span>
+            <span className="bg-red-200 px-2 py-1 rounded-full text-red-800 font-medium">
+              {wordsLearned.size} words learned
+            </span>
+            {userLevel && (
+              <span className="bg-blue-200 px-2 py-1 rounded-full text-blue-800 font-medium capitalize">
+                {userLevel.level} • HSK {userLevel.hskLevel}
+              </span>
+            )}
+          </div>
+          {userLevel && (
+            <div className="text-xs text-gray-600">
+              Confidence: {Math.round(userLevel.confidence * 100)}%
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Recommendations bar */}
+      {recommendations.length > 0 && (
+        <div className="px-4 sm:px-6 py-2 border-b border-red-100 bg-white/70">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-purple-800 font-medium">💡 Recommended:</span>
+            <div className="flex gap-2 overflow-x-auto">
+              {recommendations.slice(0, 2).map(rec => (
+                <button
+                  key={rec.id}
+                  onClick={() => startRecommendedLesson(rec)}
+                  className="flex-shrink-0 bg-purple-100 hover:bg-purple-200 text-purple-800 px-3 py-1 rounded-full text-xs font-medium transition-colors"
+                  title={`${rec.description} (${rec.estimatedTime} min)`}
+                >
+                  {rec.title}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 sm:space-y-4">
         {messages.map((message) => (
           <div
