@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 
 interface Message {
   id: string
@@ -54,7 +54,7 @@ export default function ChatInterface() {
     
     if (savedMessages) {
       try {
-        const parsedMessages = JSON.parse(savedMessages).map((msg: any) => ({
+        const parsedMessages = JSON.parse(savedMessages).map((msg: Message & { timestamp: string }) => ({
           ...msg,
           timestamp: new Date(msg.timestamp)
         }))
@@ -101,40 +101,7 @@ export default function ChatInterface() {
     scrollToBottom()
   }, [messages])
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        switch (e.key) {
-          case 'Enter':
-            e.preventDefault()
-            sendMessage()
-            break
-          case 'l':
-            e.preventDefault()
-            clearChat()
-            break
-          case 'k':
-            e.preventDefault()
-            askForCorrection()
-            break
-          case 'e':
-            e.preventDefault()
-            askForExplanation()
-            break
-        }
-      }
-      if (e.key === 'Escape') {
-        setInput('')
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [input])
-
-
-  const sendMessage = async () => {
+  const sendMessage = useCallback(async () => {
     if (!input.trim() || isLoading) return
 
     // Input validation
@@ -201,7 +168,7 @@ export default function ChatInterface() {
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [input, messages, isLoading])
 
   const clearChat = () => {
     const welcomeMessage: Message = {
@@ -215,21 +182,53 @@ export default function ChatInterface() {
     // Keep learned words when clearing chat
   }
 
-  const askForCorrection = () => {
+  const askForCorrection = useCallback(() => {
     if (messages.length < 2) return
     
     setInput('Can you correct what I just said?')
-  }
+  }, [messages.length])
 
-  const askForExplanation = () => {
+  const askForExplanation = useCallback(() => {
     if (messages.length < 2) return
     
     setInput('Can you explain what you just taught me?')
-  }
+  }, [messages.length])
 
   const startTopicLesson = (topic: string) => {
     setInput(`Let's practice Chinese conversation about ${topic}. Can you start us off with a simple scenario?`)
   }
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        switch (e.key) {
+          case 'Enter':
+            e.preventDefault()
+            sendMessage()
+            break
+          case 'l':
+            e.preventDefault()
+            clearChat()
+            break
+          case 'k':
+            e.preventDefault()
+            askForCorrection()
+            break
+          case 'e':
+            e.preventDefault()
+            askForExplanation()
+            break
+        }
+      }
+      if (e.key === 'Escape') {
+        setInput('')
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [input, sendMessage, askForCorrection, askForExplanation])
 
   return (
     <div className="bg-gradient-to-br from-red-50 to-yellow-50 rounded-xl shadow-xl border border-red-100 h-[700px] sm:h-[600px] md:h-[700px] lg:h-[800px] flex flex-col">
