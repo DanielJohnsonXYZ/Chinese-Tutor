@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chinese Tutor - Embedding Demo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+            line-height: 1.6;
+            color: #333;
+        }
+        
+        .hero {
+            text-align: center;
+            padding: 3rem 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 12px;
+            margin-bottom: 3rem;
+        }
+        
+        .hero h1 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .hero p {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+        
+        .section {
+            margin-bottom: 3rem;
+        }
+        
+        .section h2 {
+            color: #4a5568;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .code-block {
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 1.5rem;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 0.9rem;
+            overflow-x: auto;
+            margin: 1rem 0;
+        }
+        
+        .options-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+        
+        .options-table th,
+        .options-table td {
+            border: 1px solid #e2e8f0;
+            padding: 0.75rem;
+            text-align: left;
+        }
+        
+        .options-table th {
+            background: #f7fafc;
+            font-weight: 600;
+        }
+        
+        .demo-section {
+            background: #f9fafb;
+            border-radius: 12px;
+            padding: 2rem;
+            text-align: center;
+        }
+        
+        .embed-example {
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin: 1rem 0;
+        }
+        
+        .warning {
+            background: #fef5e7;
+            border: 1px solid #f6e05e;
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+        
+        .success {
+            background: #f0fff4;
+            border: 1px solid #68d391;
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="hero">
+        <h1>🎯 Chinese Tutor - Embeddable Chat</h1>
+        <p>Add AI-powered Chinese language learning to any website in minutes</p>
+    </div>
+
+    <div class="section">
+        <h2>🚀 Quick Start</h2>
+        <p>Add this single line to any HTML page to embed the Chinese Tutor chat widget:</p>
+        
+        <div class="code-block">
+&lt;script src="https://chinese-tutor.vercel.app/embed-chinese-tutor.js"
+        data-theme="light"
+        data-position="bottom-right"&gt;&lt;/script&gt;
+        </div>
+        
+        <div class="success">
+            <strong>✅ That's it!</strong> The chat widget will appear in the bottom-right corner with a floating button.
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>⚙️ Configuration Options</h2>
+        
+        <table class="options-table">
+            <thead>
+                <tr>
+                    <th>Attribute</th>
+                    <th>Options</th>
+                    <th>Default</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>data-theme</code></td>
+                    <td><code>light</code>, <code>dark</code></td>
+                    <td><code>light</code></td>
+                    <td>Visual theme</td>
+                </tr>
+                <tr>
+                    <td><code>data-position</code></td>
+                    <td><code>bottom-right</code>, <code>bottom-left</code>, <code>top-right</code>, <code>top-left</code></td>
+                    <td><code>bottom-right</code></td>
+                    <td>Widget position</td>
+                </tr>
+                <tr>
+                    <td><code>data-width</code></td>
+                    <td>Any CSS width value</td>
+                    <td><code>400px</code></td>
+                    <td>Chat window width</td>
+                </tr>
+                <tr>
+                    <td><code>data-height</code></td>
+                    <td>Any CSS height value</td>
+                    <td><code>600px</code></td>
+                    <td>Chat window height</td>
+                </tr>
+                <tr>
+                    <td><code>data-title</code></td>
+                    <td>Any string</td>
+                    <td><code>Chinese Tutor</code></td>
+                    <td>Header title</td>
+                </tr>
+                <tr>
+                    <td><code>data-auto-open</code></td>
+                    <td><code>true</code>, <code>false</code></td>
+                    <td><code>false</code></td>
+                    <td>Open immediately</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>💡 Example Configurations</h2>
+        
+        <div class="embed-example">
+            <h3>🌙 Dark Theme, Bottom Left</h3>
+            <div class="code-block">
+&lt;script src="https://chinese-tutor.vercel.app/embed-chinese-tutor.js"
+        data-theme="dark"
+        data-position="bottom-left"
+        data-title="学中文"&gt;&lt;/script&gt;
+            </div>
+        </div>
+
+        <div class="embed-example">
+            <h3>📱 Mobile Optimized</h3>
+            <div class="code-block">
+&lt;script src="https://chinese-tutor.vercel.app/embed-chinese-tutor.js"
+        data-width="350px"
+        data-height="500px"
+        data-position="bottom-right"
+        data-auto-open="true"&gt;&lt;/script&gt;
+            </div>
+        </div>
+
+        <div class="embed-example">
+            <h3>🎓 Educational Site</h3>
+            <div class="code-block">
+&lt;script src="https://chinese-tutor.vercel.app/embed-chinese-tutor.js"
+        data-title="Chinese Practice Assistant"
+        data-width="450px"
+        data-height="650px"
+        data-position="top-right"&gt;&lt;/script&gt;
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>🔧 Advanced Integration</h2>
+        
+        <h3>JavaScript API</h3>
+        <p>For more control, initialize the widget programmatically:</p>
+        
+        <div class="code-block">
+&lt;script src="https://chinese-tutor.vercel.app/embed-chinese-tutor.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+    // Initialize when ready
+    const tutor = new ChineseTutorWidget({
+        theme: 'light',
+        position: 'bottom-right',
+        width: '400px',
+        height: '600px',
+        title: 'My Chinese Tutor',
+        autoOpen: false
+    });
+
+    // Control programmatically
+    document.getElementById('open-tutor').onclick = () => tutor.openChat();
+    document.getElementById('close-tutor').onclick = () => tutor.closeChat();
+&lt;/script&gt;
+        </div>
+
+        <h3>React/Next.js Integration</h3>
+        <div class="code-block">
+import EmbeddableChat from '@/components/EmbeddableChat'
+
+function MyPage() {
+    return (
+        &lt;div&gt;
+            &lt;h1&gt;My Website&lt;/h1&gt;
+            
+            &lt;EmbeddableChat
+                theme="light"
+                position="bottom-right"
+                width="400px"
+                height="600px"
+                title="Chinese Tutor"
+            /&gt;
+        &lt;/div&gt;
+    )
+}
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>🌟 Features Included</h2>
+        
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; margin: 2rem 0;">
+            <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                <h3>🎤 Voice Recognition</h3>
+                <p>Speak Chinese directly to the tutor</p>
+            </div>
+            
+            <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                <h3>🔊 Text-to-Speech</h3>
+                <p>Click Chinese characters to hear pronunciation</p>
+            </div>
+            
+            <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                <h3>🎯 Smart Suggestions</h3>
+                <p>Context-aware conversation prompts</p>
+            </div>
+            
+            <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                <h3>📈 Progress Tracking</h3>
+                <p>Automatic level assessment and streaks</p>
+            </div>
+            
+            <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                <h3>🎨 Customizable</h3>
+                <p>Light/dark themes, flexible positioning</p>
+            </div>
+            
+            <div style="background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                <h3>📱 Mobile Ready</h3>
+                <p>Responsive design for all devices</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="demo-section">
+        <h2>🎮 Live Demo</h2>
+        <p>The chat widget on this page is a live demo! Try clicking the chat button in the corner.</p>
+        
+        <div class="warning">
+            <strong>⚠️ Note:</strong> The demo uses the same API as the main app, so conversations are fully functional with AI responses, voice features, and progress tracking.
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>❓ FAQ</h2>
+        
+        <h3>Is it free to embed?</h3>
+        <p>Yes! The embeddable chat widget is completely free to use on any website.</p>
+        
+        <h3>Does it work on mobile?</h3>
+        <p>Absolutely! The widget is fully responsive and optimized for mobile devices.</p>
+        
+        <h3>Can I customize the appearance?</h3>
+        <p>Yes, you can customize theme, position, size, colors, and title through configuration options.</p>
+        
+        <h3>Does it require an API key?</h3>
+        <p>No API key required! The widget connects to our hosted service automatically.</p>
+        
+        <h3>Is conversation data private?</h3>
+        <p>Conversations are processed securely and are not stored permanently or shared.</p>
+    </div>
+
+    <!-- Live Demo Widget -->
+    <script src="/embed-chinese-tutor.js" 
+            data-theme="light" 
+            data-position="bottom-right"
+            data-title="Demo Chinese Tutor">
+    </script>
+</body>
+</html>
