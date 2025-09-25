@@ -7,6 +7,8 @@ interface Message {
   content: string
   isUser: boolean
   timestamp: Date
+  messageType?: 'normal' | 'correction' | 'encouragement' | 'cultural' | 'grammar'
+  suggestions?: string[]
 }
 
 interface UserLevel {
@@ -73,6 +75,7 @@ export default function ChatInterface() {
   const [speechSupported, setSpeechSupported] = useState(false)
   const [dailyStreak, setDailyStreak] = useState(0)
   const [lastPracticeDate, setLastPracticeDate] = useState<string | null>(null)
+  const [conversationTopics, setConversationTopics] = useState<string[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<SpeechRecognitionInterface | null>(null)
 
@@ -166,6 +169,82 @@ export default function ChatInterface() {
     localStorage.setItem('chinese-tutor-streak', dailyStreak.toString())
     localStorage.setItem('chinese-tutor-last-practice', today)
   }, [lastPracticeDate, dailyStreak])
+
+  // Analyze message content and generate smart suggestions
+  const analyzeMessageContent = (content: string, userLevel: UserLevel | null) => {
+    const corrections = ['correct', '正确', 'should be', 'better way', '更好的表达']
+    const encouragement = ['great', 'good', 'excellent', 'well done', 'getting better', '很棒', '不错']
+    const cultural = ['culture', 'tradition', 'custom', 'in China', 'Chinese people', '文化', '传统']
+    const grammar = ['grammar', 'pattern', 'structure', 'rule', '语法', '句型']
+
+    let messageType: Message['messageType'] = 'normal'
+    let suggestions: string[] = []
+
+    // Determine message type
+    if (corrections.some(word => content.toLowerCase().includes(word))) {
+      messageType = 'correction'
+      suggestions = [
+        "Can you explain why?",
+        "Let me try again",
+        "Give me another example",
+        "Show me the pattern"
+      ]
+    } else if (encouragement.some(word => content.toLowerCase().includes(word))) {
+      messageType = 'encouragement'
+      suggestions = [
+        "What's next?",
+        "Give me something harder",
+        "Let's practice more",
+        "Teach me something new"
+      ]
+    } else if (cultural.some(word => content.toLowerCase().includes(word))) {
+      messageType = 'cultural'
+      suggestions = [
+        "Tell me more about this",
+        "How is this different in the West?",
+        "Give me an example",
+        "Is this common in China?"
+      ]
+    } else if (grammar.some(word => content.toLowerCase().includes(word))) {
+      messageType = 'grammar'
+      suggestions = [
+        "Show me more examples",
+        "What are the exceptions?",
+        "Let's practice this pattern",
+        "How do I remember this?"
+      ]
+    } else {
+      // Generate contextual suggestions based on user level and content
+      const hasChineseText = /[\u4e00-\u9fff]/.test(content)
+      
+      if (hasChineseText) {
+        suggestions = [
+          "How do I pronounce this?",
+          "What does this mean exactly?",
+          "Use this in a sentence",
+          "Is this formal or casual?"
+        ]
+      } else {
+        suggestions = [
+          "Can you repeat that in Chinese?",
+          "Show me the characters",
+          "Let's practice this topic",
+          "Ask me to try"
+        ]
+      }
+
+      // Level-specific suggestions
+      if (userLevel) {
+        if (userLevel.level === 'beginner') {
+          suggestions.push("Break this down for me", "Start with basics")
+        } else if (userLevel.level === 'advanced') {
+          suggestions.push("Give me harder examples", "What's the nuance?")
+        }
+      }
+    }
+
+    return { messageType, suggestions: suggestions.slice(0, 3) }
+  }
 
   // Track learned vocabulary
   const trackLearnedWords = (content: string) => {
@@ -341,6 +420,7 @@ export default function ChatInterface() {
     const savedLevel = localStorage.getItem('chinese-tutor-level')
     const savedStreak = localStorage.getItem('chinese-tutor-streak')
     const savedLastPractice = localStorage.getItem('chinese-tutor-last-practice')
+    const savedTopics = localStorage.getItem('chinese-tutor-topics')
     
     // Load streak data
     if (savedStreak) {
@@ -348,6 +428,16 @@ export default function ChatInterface() {
     }
     if (savedLastPractice) {
       setLastPracticeDate(savedLastPractice)
+    }
+    
+    // Load conversation topics
+    if (savedTopics) {
+      try {
+        const topics = JSON.parse(savedTopics)
+        setConversationTopics(topics)
+      } catch (error) {
+        console.error('Error loading conversation topics:', error)
+      }
     }
     
     if (savedWords) {
@@ -465,15 +555,24 @@ export default function ChatInterface() {
         throw new Error(data.error)
       }
 
+      const responseContent = data.response || 'Sorry, I didn\'t receive a proper response. Please try again.'
+      const messageAnalysis = analyzeMessageContent(responseContent, userLevel)
+      
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: data.response || 'Sorry, I didn\'t receive a proper response. Please try again.',
+        content: responseContent,
         isUser: false,
-        timestamp: new Date()
+        timestamp: new Date(),
+        messageType: messageAnalysis.messageType,
+        suggestions: messageAnalysis.suggestions
       }
 
       // Track learned words from AI response
       trackLearnedWords(aiMessage.content)
+      
+      // Track conversation topics
+      trackConversationTopics(userMessage.content)
+      trackConversationTopics(aiMessage.content)
       
       // Analyze user level based on conversation
       analyzeUserLevel(userMessage.content, aiMessage.content)
@@ -496,7 +595,7 @@ export default function ChatInterface() {
     } finally {
       setIsLoading(false)
     }
-  }, [input, messages, isLoading, analyzeUserLevel, updateDailyStreak])
+  }, [input, messages, isLoading, analyzeUserLevel, updateDailyStreak, userLevel])
 
   const clearChat = () => {
     const welcomeMessage: Message = {
@@ -528,6 +627,36 @@ export default function ChatInterface() {
 
   const startVoicePracticeMode = () => {
     setInput(`I'd like to practice speaking Chinese with you. Please give me some simple phrases to say out loud and repeat back. Focus on pronunciation and help me improve my speaking skills.`)
+  }
+
+  const handleSuggestionClick = (suggestion: string) => {
+    setInput(suggestion)
+  }
+
+  // Track conversation topics for context
+  const trackConversationTopics = (content: string) => {
+    const topicKeywords = [
+      'food', 'restaurant', 'eat', '吃', '食物', '餐厅',
+      'shopping', 'buy', 'store', '买', '购物', '商店', 
+      'family', 'parents', 'children', '家人', '父母', '孩子',
+      'work', 'job', 'office', '工作', '办公室',
+      'travel', 'trip', 'vacation', '旅行', '度假',
+      'weather', 'rain', 'sunny', '天气', '下雨', '晴天',
+      'hobby', 'music', 'movie', '爱好', '音乐', '电影',
+      'school', 'study', 'learn', '学校', '学习'
+    ]
+
+    const detectedTopics = topicKeywords.filter(keyword => 
+      content.toLowerCase().includes(keyword.toLowerCase())
+    )
+
+    if (detectedTopics.length > 0) {
+      setConversationTopics(prev => {
+        const newTopics = [...new Set([...detectedTopics, ...prev])].slice(0, 5)
+        localStorage.setItem('chinese-tutor-topics', JSON.stringify(newTopics))
+        return newTopics
+      })
+    }
   }
 
   const startRecommendedLesson = (recommendation: LessonRecommendation) => {
@@ -646,56 +775,125 @@ export default function ChatInterface() {
           </div>
         </div>
       )}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 sm:space-y-4">
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`flex ${message.isUser ? 'justify-end' : 'justify-start'}`}
-          >
-            <div
-              className={`max-w-[280px] sm:max-w-xs lg:max-w-md px-3 sm:px-4 py-2 sm:py-3 rounded-xl shadow-sm ${
-                message.isUser
-                  ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white'
-                  : 'bg-white text-gray-800 border border-gray-200'
-              }`}
-            >
-              <div className="text-sm leading-relaxed font-medium">
-                {message.content.split('\n').map((line, index) => {
-                  // Check if line contains Chinese characters
-                  const chineseMatch = line.match(/[\u4e00-\u9fff]+(\s*\([^)]+\))?/g)
-                  if (chineseMatch && !message.isUser) {
-                    return (
-                      <p key={index} className="mb-1">
-                        {line.split(/([\u4e00-\u9fff]+(\s*\([^)]+\))?)/g).map((part, partIndex) => {
-                          const isChinesePart = /[\u4e00-\u9fff]+(\s*\([^)]+\))?/.test(part)
-                          if (isChinesePart) {
-                            const chineseOnly = part.replace(/\s*\([^)]+\)/g, '')
-                            return (
-                              <span
-                                key={partIndex}
-                                className="inline-flex items-center gap-1 bg-red-50 px-1 py-0.5 rounded border border-red-200 cursor-pointer hover:bg-red-100 transition-colors"
-                                onClick={() => speakChinese(chineseOnly)}
-                                title="Click to hear pronunciation"
-                              >
-                                {part}
-                                <span className="text-xs">🔊</span>
-                              </span>
-                            )
-                          }
-                          return <span key={partIndex}>{part}</span>
-                        })}
-                      </p>
-                    )
-                  }
-                  return <p key={index} className="mb-1">{line}</p>
-                })}
-              </div>
-              <p className="text-xs mt-1 opacity-70">
-                {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </p>
+
+      {/* Recent Topics bar */}
+      {conversationTopics.length > 0 && (
+        <div className="px-4 sm:px-6 py-2 border-b border-red-100 bg-gray-50/70">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-gray-700 font-medium">🔄 Recent:</span>
+            <div className="flex gap-2 overflow-x-auto">
+              {conversationTopics.slice(0, 3).map((topic, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => startTopicLesson(topic)}
+                  className="flex-shrink-0 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded-full text-xs font-medium transition-colors capitalize"
+                >
+                  {topic}
+                </button>
+              ))}
             </div>
           </div>
-        ))}
+        </div>
+      )}
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 sm:space-y-4">
+        {messages.map((message) => {
+          const getMessageStyle = () => {
+            if (message.isUser) {
+              return 'bg-gradient-to-r from-blue-500 to-blue-600 text-white'
+            }
+            
+            switch (message.messageType) {
+              case 'correction':
+                return 'bg-gradient-to-r from-red-50 to-orange-50 text-gray-800 border border-red-200'
+              case 'encouragement':
+                return 'bg-gradient-to-r from-green-50 to-emerald-50 text-gray-800 border border-green-200'
+              case 'cultural':
+                return 'bg-gradient-to-r from-purple-50 to-violet-50 text-gray-800 border border-purple-200'
+              case 'grammar':
+                return 'bg-gradient-to-r from-blue-50 to-indigo-50 text-gray-800 border border-blue-200'
+              default:
+                return 'bg-white text-gray-800 border border-gray-200'
+            }
+          }
+
+          const getMessageIcon = () => {
+            switch (message.messageType) {
+              case 'correction': return '✏️'
+              case 'encouragement': return '🎉'
+              case 'cultural': return '🏮'
+              case 'grammar': return '📝'
+              default: return '🤖'
+            }
+          }
+
+          return (
+            <div key={message.id} className="space-y-2">
+              <div className={`flex ${message.isUser ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[280px] sm:max-w-xs lg:max-w-md px-3 sm:px-4 py-2 sm:py-3 rounded-xl shadow-sm ${getMessageStyle()}`}>
+                  {!message.isUser && message.messageType !== 'normal' && (
+                    <div className="flex items-center gap-1 mb-2 text-xs font-medium opacity-80">
+                      <span>{getMessageIcon()}</span>
+                      <span className="capitalize">{message.messageType}</span>
+                    </div>
+                  )}
+                  <div className="text-sm leading-relaxed font-medium">
+                    {message.content.split('\n').map((line, index) => {
+                      // Check if line contains Chinese characters
+                      const chineseMatch = line.match(/[\u4e00-\u9fff]+(\s*\([^)]+\))?/g)
+                      if (chineseMatch && !message.isUser) {
+                        return (
+                          <p key={index} className="mb-1">
+                            {line.split(/([\u4e00-\u9fff]+(\s*\([^)]+\))?)/g).map((part, partIndex) => {
+                              const isChinesePart = /[\u4e00-\u9fff]+(\s*\([^)]+\))?/.test(part)
+                              if (isChinesePart) {
+                                const chineseOnly = part.replace(/\s*\([^)]+\)/g, '')
+                                return (
+                                  <span
+                                    key={partIndex}
+                                    className="inline-flex items-center gap-1 bg-red-50 px-1 py-0.5 rounded border border-red-200 cursor-pointer hover:bg-red-100 transition-colors"
+                                    onClick={() => speakChinese(chineseOnly)}
+                                    title="Click to hear pronunciation"
+                                  >
+                                    {part}
+                                    <span className="text-xs">🔊</span>
+                                  </span>
+                                )
+                              }
+                              return <span key={partIndex}>{part}</span>
+                            })}
+                          </p>
+                        )
+                      }
+                      return <p key={index} className="mb-1">{line}</p>
+                    })}
+                  </div>
+                  <p className="text-xs mt-1 opacity-70">
+                    {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                </div>
+              </div>
+              
+              {/* Smart Follow-up Suggestions */}
+              {!message.isUser && message.suggestions && message.suggestions.length > 0 && (
+                <div className="flex justify-start">
+                  <div className="max-w-[280px] sm:max-w-xs lg:max-w-md ml-2">
+                    <div className="flex flex-wrap gap-1.5">
+                      {message.suggestions.map((suggestion, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => handleSuggestionClick(suggestion)}
+                          className="px-2.5 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-full transition-colors border border-blue-200 font-medium"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
         {isLoading && (
           <div className="flex justify-start">
             <div className="bg-white border border-gray-200 text-gray-900 max-w-xs lg:max-w-md px-4 py-3 rounded-xl shadow-sm">
