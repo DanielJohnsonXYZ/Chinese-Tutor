@@ -27,6 +27,20 @@ interface LessonRecommendation {
   estimatedTime: number
 }
 
+interface SpeechRecognitionEvent {
+  results: {
+    [index: number]: {
+      [index: number]: {
+        transcript: string
+      }
+    }
+  }
+}
+
+interface SpeechRecognitionErrorEvent {
+  error: string
+}
+
 export default function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -37,7 +51,41 @@ export default function ChatInterface() {
   const [showLevelAssessment, setShowLevelAssessment] = useState(false)
   const [errorCount, setErrorCount] = useState(0)
   const [successfulResponses, setSuccessfulResponses] = useState(0)
+  const [isListening, setIsListening] = useState(false)
+  const [speechSupported, setSpeechSupported] = useState(false)
+  const [dailyStreak, setDailyStreak] = useState(0)
+  const [lastPracticeDate, setLastPracticeDate] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const recognitionRef = useRef<any>(null)
+
+  // Initialize speech recognition
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+      if (SpeechRecognition) {
+        setSpeechSupported(true)
+        recognitionRef.current = new SpeechRecognition()
+        recognitionRef.current.continuous = false
+        recognitionRef.current.interimResults = false
+        recognitionRef.current.lang = 'zh-CN'
+        
+        recognitionRef.current.onresult = (event: SpeechRecognitionEvent) => {
+          const transcript = event.results[0][0].transcript
+          setInput(transcript)
+          setIsListening(false)
+        }
+        
+        recognitionRef.current.onerror = (event: SpeechRecognitionErrorEvent) => {
+          console.error('Speech recognition error:', event.error)
+          setIsListening(false)
+        }
+        
+        recognitionRef.current.onend = () => {
+          setIsListening(false)
+        }
+      }
+    }
+  }, [])
 
   // Audio synthesis for Chinese pronunciation
   const speakChinese = (text: string) => {
@@ -45,8 +93,60 @@ export default function ChatInterface() {
       const utterance = new SpeechSynthesisUtterance(text)
       utterance.lang = 'zh-CN'
       utterance.rate = 0.8
+      // Try to find a Chinese voice
+      const voices = window.speechSynthesis.getVoices()
+      const chineseVoice = voices.find(voice => 
+        voice.lang.includes('zh') || 
+        voice.name.toLowerCase().includes('chinese') ||
+        voice.name.toLowerCase().includes('mandarin')
+      )
+      if (chineseVoice) {
+        utterance.voice = chineseVoice
+      }
       window.speechSynthesis.speak(utterance)
     }
+  }
+
+  // Start voice recording
+  const startListening = () => {
+    if (recognitionRef.current && !isListening) {
+      setIsListening(true)
+      recognitionRef.current.start()
+    }
+  }
+
+  // Stop voice recording
+  const stopListening = () => {
+    if (recognitionRef.current && isListening) {
+      recognitionRef.current.stop()
+      setIsListening(false)
+    }
+  }
+
+  // Update daily practice streak
+  const updateDailyStreak = () => {
+    const today = new Date().toDateString()
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toDateString()
+    
+    if (lastPracticeDate === today) {
+      // Already practiced today
+      return
+    }
+    
+    if (lastPracticeDate === yesterday) {
+      // Consecutive day - increment streak
+      setDailyStreak(prev => prev + 1)
+    } else if (lastPracticeDate && lastPracticeDate !== yesterday) {
+      // Streak broken - reset to 1
+      setDailyStreak(1)
+    } else {
+      // First time or no previous practice
+      setDailyStreak(1)
+    }
+    
+    setLastPracticeDate(today)
+    localStorage.setItem('chinese-tutor-streak', dailyStreak.toString())
+    localStorage.setItem('chinese-tutor-last-practice', today)
   }
 
   // Track learned vocabulary
@@ -60,22 +160,6 @@ export default function ChatInterface() {
       })
     }
   }
-
-  // Analyze user performance and detect level
-  const analyzeUserLevel = useCallback((userMessage: string, aiResponse: string) => {
-    const hasChineseInput = /[\u4e00-\u9fff]/.test(userMessage)
-    const complexityScore = calculateComplexity(userMessage)
-    const errorIndicators = detectErrors(aiResponse)
-    
-    if (errorIndicators > 0) {
-      setErrorCount(prev => prev + 1)
-    } else if (hasChineseInput) {
-      setSuccessfulResponses(prev => prev + 1)
-    }
-
-    // Update level based on accumulated data
-    updateUserLevel(complexityScore, errorIndicators)
-  }, [errorCount, successfulResponses])
 
   const calculateComplexity = (text: string): number => {
     const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length
@@ -98,6 +182,22 @@ export default function ChatInterface() {
     return errorKeywords.filter(keyword => 
       aiResponse.toLowerCase().includes(keyword.toLowerCase())
     ).length
+  }
+
+  const determineStrengths = (successRate: number, complexity: number): string[] => {
+    const strengths = []
+    if (successRate > 0.7) strengths.push('Good comprehension')
+    if (complexity > 5) strengths.push('Complex sentence structure')
+    if (wordsLearned.size > 20) strengths.push('Growing vocabulary')
+    return strengths
+  }
+
+  const determineWeaknesses = (errors: number, successRate: number): string[] => {
+    const weaknesses = []
+    if (errors > 3) weaknesses.push('Grammar accuracy')
+    if (successRate < 0.5) weaknesses.push('Overall fluency')
+    if (wordsLearned.size < 10) weaknesses.push('Limited vocabulary')
+    return weaknesses
   }
 
   const updateUserLevel = useCallback((complexity: number, errors: number) => {
@@ -139,21 +239,21 @@ export default function ChatInterface() {
     generateRecommendations(newLevel)
   }, [successfulResponses, errorCount, wordsLearned.size])
 
-  const determineStrengths = (successRate: number, complexity: number): string[] => {
-    const strengths = []
-    if (successRate > 0.7) strengths.push('Good comprehension')
-    if (complexity > 5) strengths.push('Complex sentence structure')
-    if (wordsLearned.size > 20) strengths.push('Growing vocabulary')
-    return strengths
-  }
+  // Analyze user performance and detect level
+  const analyzeUserLevel = useCallback((userMessage: string, aiResponse: string) => {
+    const hasChineseInput = /[\u4e00-\u9fff]/.test(userMessage)
+    const complexityScore = calculateComplexity(userMessage)
+    const errorIndicators = detectErrors(aiResponse)
+    
+    if (errorIndicators > 0) {
+      setErrorCount(prev => prev + 1)
+    } else if (hasChineseInput) {
+      setSuccessfulResponses(prev => prev + 1)
+    }
 
-  const determineWeaknesses = (errors: number, successRate: number): string[] => {
-    const weaknesses = []
-    if (errors > 3) weaknesses.push('Grammar accuracy')
-    if (successRate < 0.5) weaknesses.push('Overall fluency')
-    if (wordsLearned.size < 10) weaknesses.push('Limited vocabulary')
-    return weaknesses
-  }
+    // Update level based on accumulated data
+    updateUserLevel(complexityScore, errorIndicators)
+  }, [updateUserLevel])
 
   const generateRecommendations = (level: UserLevel) => {
     const recommendations: LessonRecommendation[] = []
@@ -221,6 +321,16 @@ export default function ChatInterface() {
     const savedMessages = localStorage.getItem('chinese-tutor-messages')
     const savedWords = localStorage.getItem('chinese-tutor-words')
     const savedLevel = localStorage.getItem('chinese-tutor-level')
+    const savedStreak = localStorage.getItem('chinese-tutor-streak')
+    const savedLastPractice = localStorage.getItem('chinese-tutor-last-practice')
+    
+    // Load streak data
+    if (savedStreak) {
+      setDailyStreak(parseInt(savedStreak, 10) || 0)
+    }
+    if (savedLastPractice) {
+      setLastPracticeDate(savedLastPractice)
+    }
     
     if (savedWords) {
       try {
@@ -350,6 +460,9 @@ export default function ChatInterface() {
       // Analyze user level based on conversation
       analyzeUserLevel(userMessage.content, aiMessage.content)
       
+      // Update daily practice streak
+      updateDailyStreak()
+      
       setMessages(prev => [...prev, aiMessage])
     } catch (error) {
       console.error('Error sending message:', error)
@@ -365,7 +478,7 @@ export default function ChatInterface() {
     } finally {
       setIsLoading(false)
     }
-  }, [input, messages, isLoading, analyzeUserLevel])
+  }, [input, messages, isLoading, analyzeUserLevel, updateDailyStreak])
 
   const clearChat = () => {
     const welcomeMessage: Message = {
@@ -393,6 +506,10 @@ export default function ChatInterface() {
 
   const startTopicLesson = (topic: string) => {
     setInput(`Let's practice Chinese conversation about ${topic}. Can you start us off with a simple scenario?`)
+  }
+
+  const startVoicePracticeMode = () => {
+    setInput(`I'd like to practice speaking Chinese with you. Please give me some simple phrases to say out loud and repeat back. Focus on pronunciation and help me improve my speaking skills.`)
   }
 
   const startRecommendedLesson = (recommendation: LessonRecommendation) => {
@@ -472,6 +589,11 @@ export default function ChatInterface() {
             <span className="bg-red-200 px-2 py-1 rounded-full text-red-800 font-medium">
               {wordsLearned.size} words learned
             </span>
+            {dailyStreak > 0 && (
+              <span className="bg-orange-200 px-2 py-1 rounded-full text-orange-800 font-medium">
+                🔥 {dailyStreak} day streak
+              </span>
+            )}
             {userLevel && (
               <span className="bg-blue-200 px-2 py-1 rounded-full text-blue-800 font-medium capitalize">
                 {userLevel.level} • HSK {userLevel.hskLevel}
@@ -598,6 +720,14 @@ export default function ChatInterface() {
           >
             🛍️ Shopping
           </button>
+          {speechSupported && (
+            <button
+              onClick={startVoicePracticeMode}
+              className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm bg-gradient-to-r from-orange-100 to-orange-200 text-orange-800 rounded-full hover:from-orange-200 hover:to-orange-300 transition-all duration-200 shadow-sm border border-orange-300 font-medium"
+            >
+              🎙️ Voice Practice
+            </button>
+          )}
           <button
             onClick={clearChat}
             className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm bg-gradient-to-r from-red-100 to-red-200 text-red-800 rounded-full hover:from-red-200 hover:to-red-300 transition-all duration-200 shadow-sm border border-red-300 font-medium"
@@ -613,12 +743,26 @@ export default function ChatInterface() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-            placeholder="Type your message or try Chinese..."
+            placeholder="Type your message, speak Chinese, or record..."
             className="flex-1 border border-red-200 rounded-xl px-3 sm:px-4 py-2.5 sm:py-3 focus:outline-none focus:ring-2 focus:ring-red-300 focus:border-red-300 bg-white shadow-sm font-medium text-sm sm:text-base"
             disabled={isLoading}
             maxLength={500}
             aria-label="Type your message to the Chinese tutor"
           />
+          {speechSupported && (
+            <button
+              onClick={isListening ? stopListening : startListening}
+              disabled={isLoading}
+              className={`px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl focus:outline-none focus:ring-2 transition-all duration-200 shadow-sm font-medium text-sm sm:text-base ${
+                isListening 
+                  ? 'bg-gradient-to-r from-green-500 to-green-600 text-white hover:from-green-600 hover:to-green-700 focus:ring-green-300' 
+                  : 'bg-gradient-to-r from-purple-500 to-purple-600 text-white hover:from-purple-600 hover:to-purple-700 focus:ring-purple-300'
+              } disabled:opacity-50 disabled:cursor-not-allowed`}
+              title={isListening ? 'Stop recording (speak now!)' : 'Record voice message'}
+            >
+              {isListening ? '⏹️' : '🎤'}
+            </button>
+          )}
           <button
             onClick={sendMessage}
             disabled={isLoading || !input.trim()}
