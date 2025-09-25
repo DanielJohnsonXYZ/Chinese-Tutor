@@ -76,8 +76,12 @@ export default function ChatInterface() {
   const [dailyStreak, setDailyStreak] = useState(0)
   const [lastPracticeDate, setLastPracticeDate] = useState<string | null>(null)
   const [conversationTopics, setConversationTopics] = useState<string[]>([])
+  const [isTyping, setIsTyping] = useState(false)
+  const [conversationStarters, setConversationStarters] = useState<string[]>([])
+  const [quickReplies, setQuickReplies] = useState<string[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<SpeechRecognitionInterface | null>(null)
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // Initialize speech recognition
   useEffect(() => {
@@ -440,6 +444,9 @@ export default function ChatInterface() {
       }
     }
     
+    // Generate initial conversation starters
+    setConversationStarters(generateConversationStarters(userLevel))
+    
     if (savedWords) {
       try {
         const parsedWords = JSON.parse(savedWords)
@@ -537,6 +544,9 @@ export default function ChatInterface() {
     setMessages(prev => [...prev, userMessage])
     setInput('')
     setIsLoading(true)
+    
+    // Show typing indicator with natural delay
+    setIsTyping(true)
 
     try {
       const response = await fetch('/api/chat', {
@@ -580,6 +590,14 @@ export default function ChatInterface() {
       // Update daily practice streak
       updateDailyStreak()
       
+      // Generate quick replies for the next interaction
+      setQuickReplies(generateQuickReplies(responseContent))
+      
+      // Update conversation starters based on new level
+      if (userLevel) {
+        setConversationStarters(generateConversationStarters(userLevel))
+      }
+      
       setMessages(prev => [...prev, aiMessage])
     } catch (error) {
       console.error('Error sending message:', error)
@@ -594,6 +612,7 @@ export default function ChatInterface() {
       setMessages(prev => [...prev, errorMessage])
     } finally {
       setIsLoading(false)
+      setIsTyping(false)
     }
   }, [input, messages, isLoading, analyzeUserLevel, updateDailyStreak, userLevel])
 
@@ -629,11 +648,91 @@ export default function ChatInterface() {
     setInput(`I'd like to practice speaking Chinese with you. Please give me some simple phrases to say out loud and repeat back. Focus on pronunciation and help me improve my speaking skills.`)
   }
 
+  // Help restart conversations when they stall
+  const restartConversation = () => {
+    const restartPrompts = [
+      "Let's try a different topic",
+      "Can we start fresh with something new?",
+      "I'd like to practice something else",
+      "What should we talk about now?",
+      "Give me a new challenge"
+    ]
+    const randomPrompt = restartPrompts[Math.floor(Math.random() * restartPrompts.length)]
+    setInput(randomPrompt)
+  }
+
   const handleSuggestionClick = (suggestion: string) => {
     setInput(suggestion)
   }
 
   // Track conversation topics for context
+  // Generate conversation starters based on user level
+  const generateConversationStarters = (level: UserLevel | null) => {
+    const beginnerStarters = [
+      "Hello, how are you?",
+      "I want to learn greetings",
+      "How do I say my name?",
+      "What's the weather like?",
+      "I'm hungry"
+    ]
+    
+    const intermediateStarters = [
+      "Tell me about Chinese festivals",
+      "How do I order food in a restaurant?",
+      "What's your favorite hobby?",
+      "Describe your typical day",
+      "Let's talk about travel"
+    ]
+    
+    const advancedStarters = [
+      "What are the cultural differences between East and West?",
+      "Explain the philosophy behind Chinese idioms",
+      "Discuss current events in China",
+      "What's changing in modern Chinese society?",
+      "Let's debate something interesting"
+    ]
+
+    if (!level) return beginnerStarters.slice(0, 3)
+    
+    switch (level.level) {
+      case 'advanced':
+        return advancedStarters.slice(0, 3)
+      case 'intermediate':
+        return intermediateStarters.slice(0, 3)
+      default:
+        return beginnerStarters.slice(0, 3)
+    }
+  }
+
+  // Generate quick replies for natural conversation flow
+  const generateQuickReplies = (lastMessage: string) => {
+    const questionWords = ['what', 'how', 'why', 'when', 'where', 'who']
+    const isQuestion = questionWords.some(word => lastMessage.toLowerCase().includes(word)) || lastMessage.includes('?')
+    
+    if (isQuestion) {
+      return [
+        "I don't know, can you teach me?",
+        "That's interesting, tell me more",
+        "I'm not sure, show me how"
+      ]
+    }
+    
+    const hasChineseText = /[\u4e00-\u9fff]/.test(lastMessage)
+    if (hasChineseText) {
+      return [
+        "Can you repeat that slower?",
+        "How do you write that?",
+        "What's the tone for that?"
+      ]
+    }
+    
+    return [
+      "That's helpful, what else?",
+      "I understand, continue please",
+      "Can you give me an example?"
+    ]
+  }
+
   const trackConversationTopics = (content: string) => {
     const topicKeywords = [
       'food', 'restaurant', 'eat', '吃', '食物', '餐厅',
@@ -894,13 +993,16 @@ export default function ChatInterface() {
             </div>
           )
         })}
-        {isLoading && (
+        {(isLoading || isTyping) && (
           <div className="flex justify-start">
             <div className="bg-white border border-gray-200 text-gray-900 max-w-xs lg:max-w-md px-4 py-3 rounded-xl shadow-sm">
-              <div className="flex space-x-1">
-                <div className="w-2 h-2 bg-red-400 rounded-full animate-bounce"></div>
-                <div className="w-2 h-2 bg-yellow-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                <div className="w-2 h-2 bg-red-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+              <div className="flex items-center space-x-2">
+                <div className="flex space-x-1">
+                  <div className="w-2 h-2 bg-red-400 rounded-full animate-bounce"></div>
+                  <div className="w-2 h-2 bg-yellow-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                  <div className="w-2 h-2 bg-red-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                </div>
+                <span className="text-xs text-gray-500">Tutor is thinking...</span>
               </div>
             </div>
           </div>
@@ -909,6 +1011,46 @@ export default function ChatInterface() {
       </div>
 
       <div className="border-t border-red-100 bg-white/50 backdrop-blur-sm p-4 sm:p-6">
+        {/* Quick Replies for Natural Flow */}
+        {quickReplies.length > 0 && (
+          <div className="mb-3">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs text-gray-600 font-medium">💬 Quick replies:</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {quickReplies.map((reply, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleSuggestionClick(reply)}
+                  className="px-3 py-1.5 text-xs bg-green-100 hover:bg-green-200 text-green-700 rounded-full transition-colors border border-green-200 font-medium"
+                >
+                  {reply}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Conversation Starters for Empty State */}
+        {messages.length <= 1 && conversationStarters.length > 0 && (
+          <div className="mb-3">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs text-gray-600 font-medium">🚀 Try saying:</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {conversationStarters.map((starter, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setInput(starter)}
+                  className="px-3 py-1.5 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-full transition-colors border border-blue-200 font-medium"
+                >
+                  {starter}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-3 sm:mb-4">
           <button
             onClick={askForCorrection}
@@ -945,11 +1087,17 @@ export default function ChatInterface() {
             </button>
           )}
           <button
+            onClick={restartConversation}
+            className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm bg-gradient-to-r from-indigo-100 to-indigo-200 text-indigo-800 rounded-full hover:from-indigo-200 hover:to-indigo-300 transition-all duration-200 shadow-sm border border-indigo-300 font-medium"
+          >
+            🔄 New Topic
+          </button>
+          <button
             onClick={clearChat}
             className="px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm bg-gradient-to-r from-red-100 to-red-200 text-red-800 rounded-full hover:from-red-200 hover:to-red-300 transition-all duration-200 shadow-sm border border-red-300 font-medium"
             title="Keyboard shortcut: Ctrl+L"
           >
-            🔄 New Lesson
+            🗑️ Clear Chat
           </button>
         </div>
         
