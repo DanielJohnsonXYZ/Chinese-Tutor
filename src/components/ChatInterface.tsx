@@ -41,6 +41,24 @@ interface SpeechRecognitionErrorEvent {
   error: string
 }
 
+interface SpeechRecognitionInterface {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: (event: SpeechRecognitionEvent) => void;
+  onerror: (event: SpeechRecognitionErrorEvent) => void;
+  onend: () => void;
+  start: () => void;
+  stop: () => void;
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition?: new() => SpeechRecognitionInterface;
+    webkitSpeechRecognition?: new() => SpeechRecognitionInterface;
+  }
+}
+
 export default function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -56,12 +74,12 @@ export default function ChatInterface() {
   const [dailyStreak, setDailyStreak] = useState(0)
   const [lastPracticeDate, setLastPracticeDate] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const recognitionRef = useRef<any>(null)
+  const recognitionRef = useRef<SpeechRecognitionInterface | null>(null)
 
   // Initialize speech recognition
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
       if (SpeechRecognition) {
         setSpeechSupported(true)
         recognitionRef.current = new SpeechRecognition()
@@ -124,7 +142,7 @@ export default function ChatInterface() {
   }
 
   // Update daily practice streak
-  const updateDailyStreak = () => {
+  const updateDailyStreak = useCallback(() => {
     const today = new Date().toDateString()
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toDateString()
     
@@ -147,7 +165,7 @@ export default function ChatInterface() {
     setLastPracticeDate(today)
     localStorage.setItem('chinese-tutor-streak', dailyStreak.toString())
     localStorage.setItem('chinese-tutor-last-practice', today)
-  }
+  }, [lastPracticeDate, dailyStreak])
 
   // Track learned vocabulary
   const trackLearnedWords = (content: string) => {
@@ -237,7 +255,7 @@ export default function ChatInterface() {
     setUserLevel(newLevel)
     localStorage.setItem('chinese-tutor-level', JSON.stringify(newLevel))
     generateRecommendations(newLevel)
-  }, [successfulResponses, errorCount, wordsLearned.size])
+  }, [successfulResponses, errorCount, determineStrengths, determineWeaknesses])
 
   // Analyze user performance and detect level
   const analyzeUserLevel = useCallback((userMessage: string, aiResponse: string) => {
