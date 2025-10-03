@@ -1,23 +1,24 @@
 import EmbeddableChat from '@/components/EmbeddableChat'
 
 interface EmbedPageProps {
-  searchParams: {
+  searchParams: Promise<{
     theme?: 'light' | 'dark'
     title?: string
     width?: string
     height?: string
     placeholder?: string
-  }
+  }>
 }
 
-export default function EmbedPage({ searchParams }: EmbedPageProps) {
+export default async function EmbedPage({ searchParams }: EmbedPageProps) {
+  const params = await searchParams
   const {
     theme = 'light',
     title = 'Chinese Tutor',
     width = '100%',
     height = '100vh',
     placeholder = 'Ask me anything in Chinese...'
-  } = searchParams
+  } = params
 
   return (
     <div className="h-screen w-full overflow-hidden">

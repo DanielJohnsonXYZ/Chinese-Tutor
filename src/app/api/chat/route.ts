@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
+import { API_CONFIG, RATE_LIMIT } from '@/constants/app'
+
+if (!process.env.ANTHROPIC_API_KEY) {
+  throw new Error('ANTHROPIC_API_KEY environment variable is not configured')
+}
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -64,18 +69,57 @@ interface Message {
   timestamp: Date
 }
 
+// Simple in-memory rate limiting (for production, use Redis or similar)
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>()
+
+function getRateLimitKey(request: NextRequest): string {
+  // Use IP address for rate limiting
+  const forwarded = request.headers.get('x-forwarded-for')
+  const ip = forwarded ? forwarded.split(',')[0] : request.headers.get('x-real-ip') || 'unknown'
+  return ip
+}
+
+function checkRateLimit(key: string): boolean {
+  const now = Date.now()
+  const record = rateLimitMap.get(key)
+
+  if (!record || now > record.resetTime) {
+    rateLimitMap.set(key, { count: 1, resetTime: now + RATE_LIMIT.WINDOW_MS })
+    return true
+  }
+
+  if (record.count >= RATE_LIMIT.MAX_REQUESTS) {
+    return false
+  }
+
+  record.count++
+  return true
+}
+
 export async function POST(request: NextRequest) {
   try {
+    // Rate limiting
+    const rateLimitKey = getRateLimitKey(request)
+    if (!checkRateLimit(rateLimitKey)) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please wait a moment before trying again.' },
+        { status: 429 }
+      )
+    }
+
     const { message, messages }: { message: string; messages: Message[] } = await request.json()
 
-    const conversationHistory = messages.map((msg: Message) => ({
+    // Truncate conversation history to prevent token limit issues
+    const recentMessages = messages.slice(-API_CONFIG.MAX_HISTORY_MESSAGES)
+
+    const conversationHistory = recentMessages.map((msg: Message) => ({
       role: msg.isUser ? 'user' as const : 'assistant' as const,
       content: msg.content
     }))
 
     const response = await anthropic.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
-      max_tokens: 1000,
+      model: API_CONFIG.MODEL,
+      max_tokens: API_CONFIG.MAX_TOKENS,
       system: SYSTEM_PROMPT,
       messages: [
         ...conversationHistory,

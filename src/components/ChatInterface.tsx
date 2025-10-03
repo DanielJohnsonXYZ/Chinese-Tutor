@@ -1,6 +1,23 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import MessageBubble from './MessageBubble'
+import { setItemSafe, getItemSafe, debounce, truncateMessages } from '@/utils/localStorage'
+import { fetchJsonWithRetry } from '@/utils/apiRetry'
+import { validateAndSanitizeMessage } from '@/utils/sanitize'
+import {
+  INPUT_CONSTRAINTS,
+  STORAGE_CONFIG,
+  STORAGE_KEYS,
+  LEVEL_ASSESSMENT,
+  SPEECH_CONFIG,
+  UI_TIMEOUTS,
+  VOCAB_THRESHOLDS,
+  ERROR_THRESHOLDS,
+  SUCCESS_THRESHOLDS,
+  COMPLEXITY_SCORING,
+  API_CONFIG
+} from '@/constants/app'
 
 interface Message {
   id: string
@@ -82,6 +99,8 @@ export default function ChatInterface() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const recognitionRef = useRef<SpeechRecognitionInterface | null>(null)
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const messagesRef = useRef<Message[]>([])
+  const inputRef = useRef<string>('')
 
   // Initialize speech recognition
   useEffect(() => {
@@ -90,9 +109,9 @@ export default function ChatInterface() {
       if (SpeechRecognition) {
         setSpeechSupported(true)
         recognitionRef.current = new SpeechRecognition()
-        recognitionRef.current.continuous = false
-        recognitionRef.current.interimResults = false
-        recognitionRef.current.lang = 'zh-CN'
+        recognitionRef.current.continuous = SPEECH_CONFIG.CONTINUOUS
+        recognitionRef.current.interimResults = SPEECH_CONFIG.INTERIM_RESULTS
+        recognitionRef.current.lang = SPEECH_CONFIG.LANG
         
         recognitionRef.current.onresult = (event: SpeechRecognitionEvent) => {
           const transcript = event.results[0][0].transcript
@@ -113,24 +132,36 @@ export default function ChatInterface() {
   }, [])
 
   // Audio synthesis for Chinese pronunciation
-  const speakChinese = (text: string) => {
+  const speakChinese = useCallback((text: string) => {
     if ('speechSynthesis' in window) {
       const utterance = new SpeechSynthesisUtterance(text)
-      utterance.lang = 'zh-CN'
-      utterance.rate = 0.8
-      // Try to find a Chinese voice
-      const voices = window.speechSynthesis.getVoices()
-      const chineseVoice = voices.find(voice => 
-        voice.lang.includes('zh') || 
-        voice.name.toLowerCase().includes('chinese') ||
-        voice.name.toLowerCase().includes('mandarin')
-      )
-      if (chineseVoice) {
-        utterance.voice = chineseVoice
+      utterance.lang = SPEECH_CONFIG.LANG
+      utterance.rate = SPEECH_CONFIG.RATE
+
+      // Function to set voice
+      const setVoice = () => {
+        const voices = window.speechSynthesis.getVoices()
+        const chineseVoice = voices.find(voice =>
+          voice.lang.includes('zh') ||
+          voice.name.toLowerCase().includes('chinese') ||
+          voice.name.toLowerCase().includes('mandarin')
+        )
+        if (chineseVoice) {
+          utterance.voice = chineseVoice
+        }
       }
+
+      // Try to set voice immediately
+      setVoice()
+
+      // Chrome bug workaround: voices load asynchronously
+      if (window.speechSynthesis.getVoices().length === 0) {
+        window.speechSynthesis.addEventListener('voiceschanged', setVoice, { once: true })
+      }
+
       window.speechSynthesis.speak(utterance)
     }
-  }
+  }, [])
 
   // Start voice recording
   const startListening = () => {
@@ -152,27 +183,32 @@ export default function ChatInterface() {
   const updateDailyStreak = useCallback(() => {
     const today = new Date().toDateString()
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toDateString()
-    
+
     if (lastPracticeDate === today) {
       // Already practiced today
       return
     }
-    
+
     if (lastPracticeDate === yesterday) {
       // Consecutive day - increment streak
-      setDailyStreak(prev => prev + 1)
+      setDailyStreak(prev => {
+        const newStreak = prev + 1
+        localStorage.setItem('chinese-tutor-streak', newStreak.toString())
+        return newStreak
+      })
     } else if (lastPracticeDate && lastPracticeDate !== yesterday) {
       // Streak broken - reset to 1
       setDailyStreak(1)
+      localStorage.setItem('chinese-tutor-streak', '1')
     } else {
       // First time or no previous practice
       setDailyStreak(1)
+      localStorage.setItem('chinese-tutor-streak', '1')
     }
-    
+
     setLastPracticeDate(today)
-    localStorage.setItem('chinese-tutor-streak', dailyStreak.toString())
     localStorage.setItem('chinese-tutor-last-practice', today)
-  }, [lastPracticeDate, dailyStreak])
+  }, [lastPracticeDate])
 
   // Analyze message content and generate smart suggestions
   const analyzeMessageContent = (content: string, userLevel: UserLevel | null) => {
@@ -266,13 +302,13 @@ export default function ChatInterface() {
     const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length
     const wordCount = text.split(/\s+/).length
     const hasComplexStructure = /[，。！？；：]/.test(text)
-    
+
     let score = 0
-    if (chineseChars > 0) score += Math.min(chineseChars / 5, 3) // Max 3 points for character count
-    if (wordCount > 10) score += 1
-    if (hasComplexStructure) score += 2
-    
-    return Math.min(score, 10) // Cap at 10
+    if (chineseChars > 0) score += Math.min(chineseChars / COMPLEXITY_SCORING.CHARS_PER_POINT, COMPLEXITY_SCORING.MAX_CHAR_POINTS)
+    if (wordCount > COMPLEXITY_SCORING.WORD_COUNT_THRESHOLD) score += 1
+    if (hasComplexStructure) score += COMPLEXITY_SCORING.COMPLEX_STRUCTURE_BONUS
+
+    return Math.min(score, COMPLEXITY_SCORING.MAX_SCORE)
   }
 
   const detectErrors = (aiResponse: string): number => {
@@ -285,44 +321,44 @@ export default function ChatInterface() {
     ).length
   }
 
-  const determineStrengths = (successRate: number, complexity: number): string[] => {
+  const determineStrengths = useCallback((successRate: number, complexity: number): string[] => {
     const strengths = []
-    if (successRate > 0.7) strengths.push('Good comprehension')
-    if (complexity > 5) strengths.push('Complex sentence structure')
-    if (wordsLearned.size > 20) strengths.push('Growing vocabulary')
+    if (successRate > SUCCESS_THRESHOLDS.GOOD) strengths.push('Good comprehension')
+    if (complexity > COMPLEXITY_SCORING.MAX_CHAR_POINTS + 2) strengths.push('Complex sentence structure')
+    if (wordsLearned.size > VOCAB_THRESHOLDS.GROWING) strengths.push('Growing vocabulary')
     return strengths
-  }
+  }, [wordsLearned.size])
 
-  const determineWeaknesses = (errors: number, successRate: number): string[] => {
+  const determineWeaknesses = useCallback((errors: number, successRate: number): string[] => {
     const weaknesses = []
-    if (errors > 3) weaknesses.push('Grammar accuracy')
-    if (successRate < 0.5) weaknesses.push('Overall fluency')
-    if (wordsLearned.size < 10) weaknesses.push('Limited vocabulary')
+    if (errors > ERROR_THRESHOLDS.HIGH_ERRORS) weaknesses.push('Grammar accuracy')
+    if (successRate < SUCCESS_THRESHOLDS.POOR) weaknesses.push('Overall fluency')
+    if (wordsLearned.size < VOCAB_THRESHOLDS.LIMITED) weaknesses.push('Limited vocabulary')
     return weaknesses
-  }
+  }, [wordsLearned.size])
 
   const updateUserLevel = useCallback((complexity: number, errors: number) => {
     const totalInteractions = successfulResponses + errorCount
-    if (totalInteractions < 3) return // Need more data
+    if (totalInteractions < LEVEL_ASSESSMENT.MIN_INTERACTIONS) return // Need more data
 
     const successRate = totalInteractions > 0 ? successfulResponses / totalInteractions : 0
     const avgComplexity = complexity
-    
+
     let level: UserLevel['level'] = 'beginner'
-    let hskLevel = 1
+    let hskLevel = LEVEL_ASSESSMENT.HSK_BEGINNER
     let confidence = 0.5
 
-    if (successRate > 0.8 && avgComplexity > 6) {
+    if (successRate > LEVEL_ASSESSMENT.SUCCESS_RATE_ADVANCED && avgComplexity > LEVEL_ASSESSMENT.COMPLEXITY_ADVANCED) {
       level = 'advanced'
-      hskLevel = 5
+      hskLevel = LEVEL_ASSESSMENT.HSK_ADVANCED
       confidence = 0.9
-    } else if (successRate > 0.6 && avgComplexity > 4) {
+    } else if (successRate > LEVEL_ASSESSMENT.SUCCESS_RATE_INTERMEDIATE && avgComplexity > LEVEL_ASSESSMENT.COMPLEXITY_INTERMEDIATE) {
       level = 'intermediate'
-      hskLevel = 3
+      hskLevel = LEVEL_ASSESSMENT.HSK_INTERMEDIATE
       confidence = 0.8
-    } else if (successRate > 0.4 && avgComplexity > 2) {
+    } else if (successRate > LEVEL_ASSESSMENT.SUCCESS_RATE_ELEMENTARY && avgComplexity > LEVEL_ASSESSMENT.COMPLEXITY_ELEMENTARY) {
       level = 'elementary'
-      hskLevel = 2
+      hskLevel = LEVEL_ASSESSMENT.HSK_ELEMENTARY
       confidence = 0.7
     }
 
@@ -336,7 +372,7 @@ export default function ChatInterface() {
     }
 
     setUserLevel(newLevel)
-    localStorage.setItem('chinese-tutor-level', JSON.stringify(newLevel))
+    setItemSafe(STORAGE_KEYS.LEVEL, newLevel)
     generateRecommendations(newLevel)
   }, [successfulResponses, errorCount, determineStrengths, determineWeaknesses])
 
@@ -419,13 +455,13 @@ export default function ChatInterface() {
 
   // Load messages and progress from localStorage on mount
   useEffect(() => {
-    const savedMessages = localStorage.getItem('chinese-tutor-messages')
-    const savedWords = localStorage.getItem('chinese-tutor-words')
-    const savedLevel = localStorage.getItem('chinese-tutor-level')
-    const savedStreak = localStorage.getItem('chinese-tutor-streak')
-    const savedLastPractice = localStorage.getItem('chinese-tutor-last-practice')
-    const savedTopics = localStorage.getItem('chinese-tutor-topics')
-    
+    const savedStreak = getItemSafe<string>(STORAGE_KEYS.STREAK)
+    const savedLastPractice = getItemSafe<string>(STORAGE_KEYS.LAST_PRACTICE)
+    const savedTopics = getItemSafe<string[]>(STORAGE_KEYS.TOPICS)
+    const savedWords = getItemSafe<string[]>(STORAGE_KEYS.WORDS)
+    const savedLevel = getItemSafe<UserLevel>(STORAGE_KEYS.LEVEL)
+    const savedMessages = getItemSafe<(Message & { timestamp: string })[]>(STORAGE_KEYS.MESSAGES)
+
     // Load streak data
     if (savedStreak) {
       setDailyStreak(parseInt(savedStreak, 10) || 0)
@@ -433,58 +469,39 @@ export default function ChatInterface() {
     if (savedLastPractice) {
       setLastPracticeDate(savedLastPractice)
     }
-    
+
     // Load conversation topics
-    if (savedTopics) {
-      try {
-        const topics = JSON.parse(savedTopics)
-        setConversationTopics(topics)
-      } catch (error) {
-        console.error('Error loading conversation topics:', error)
-      }
+    if (savedTopics && Array.isArray(savedTopics)) {
+      setConversationTopics(savedTopics)
     }
-    
+
     // Generate initial conversation starters
     setConversationStarters(generateConversationStarters(userLevel))
-    
-    if (savedWords) {
-      try {
-        const parsedWords = JSON.parse(savedWords)
-        setWordsLearned(new Set(parsedWords))
-      } catch (error) {
-        console.error('Error loading saved words:', error)
-      }
+
+    if (savedWords && Array.isArray(savedWords)) {
+      setWordsLearned(new Set(savedWords))
     }
 
     if (savedLevel) {
-      try {
-        const parsedLevel = JSON.parse(savedLevel)
-        parsedLevel.lastAssessed = new Date(parsedLevel.lastAssessed)
-        setUserLevel(parsedLevel)
-        generateRecommendations(parsedLevel)
-      } catch (error) {
-        console.error('Error loading saved level:', error)
-      }
+      savedLevel.lastAssessed = new Date(savedLevel.lastAssessed)
+      setUserLevel(savedLevel)
+      generateRecommendations(savedLevel)
     } else {
       // Show level assessment for new users
-      setTimeout(() => setShowLevelAssessment(true), 3000)
+      setTimeout(() => setShowLevelAssessment(true), UI_TIMEOUTS.LEVEL_ASSESSMENT_DELAY)
     }
-    
-    if (savedMessages) {
-      try {
-        const parsedMessages = JSON.parse(savedMessages).map((msg: Message & { timestamp: string }) => ({
-          ...msg,
-          timestamp: new Date(msg.timestamp)
-        }))
-        setMessages(parsedMessages)
-        // Track words from loaded messages
-        parsedMessages.forEach((msg: Message) => {
-          if (!msg.isUser) trackLearnedWords(msg.content)
-        })
-        return
-      } catch (error) {
-        console.error('Error loading saved messages:', error)
-      }
+
+    if (savedMessages && Array.isArray(savedMessages)) {
+      const parsedMessages = savedMessages.map((msg) => ({
+        ...msg,
+        timestamp: new Date(msg.timestamp)
+      }))
+      setMessages(parsedMessages)
+      // Track words from loaded messages
+      parsedMessages.forEach((msg: Message) => {
+        if (!msg.isUser) trackLearnedWords(msg.content)
+      })
+      return
     }
     
     // Default welcome message if no saved messages
@@ -497,19 +514,45 @@ export default function ChatInterface() {
     setMessages([welcomeMessage])
   }, [])
 
-  // Save messages to localStorage whenever messages change
+  // Sync messages ref with state
   useEffect(() => {
-    if (messages.length > 0) {
-      localStorage.setItem('chinese-tutor-messages', JSON.stringify(messages))
-    }
+    messagesRef.current = messages
   }, [messages])
 
-  // Save learned words to localStorage
+  // Sync input ref with state
+  useEffect(() => {
+    inputRef.current = input
+  }, [input])
+
+  // Debounced localStorage save functions
+  const debouncedSaveMessages = useMemo(
+    () => debounce((msgs: Message[]) => {
+      const truncated = truncateMessages(msgs, STORAGE_CONFIG.MAX_MESSAGES_STORED)
+      setItemSafe(STORAGE_KEYS.MESSAGES, truncated)
+    }, STORAGE_CONFIG.DEBOUNCE_DELAY),
+    []
+  )
+
+  const debouncedSaveWords = useMemo(
+    () => debounce((words: Set<string>) => {
+      setItemSafe(STORAGE_KEYS.WORDS, [...words])
+    }, STORAGE_CONFIG.DEBOUNCE_DELAY),
+    []
+  )
+
+  // Save messages to localStorage whenever messages change (debounced)
+  useEffect(() => {
+    if (messages.length > 0) {
+      debouncedSaveMessages(messages)
+    }
+  }, [messages, debouncedSaveMessages])
+
+  // Save learned words to localStorage (debounced)
   useEffect(() => {
     if (wordsLearned.size > 0) {
-      localStorage.setItem('chinese-tutor-words', JSON.stringify([...wordsLearned]))
+      debouncedSaveWords(wordsLearned)
     }
-  }, [wordsLearned])
+  }, [wordsLearned, debouncedSaveWords])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -522,11 +565,13 @@ export default function ChatInterface() {
   const sendMessage = useCallback(async () => {
     if (!input.trim() || isLoading) return
 
-    // Input validation
-    if (input.trim().length > 500) {
+    // Validate and sanitize input
+    const validation = validateAndSanitizeMessage(input, INPUT_CONSTRAINTS.MAX_MESSAGE_LENGTH)
+
+    if (!validation.valid) {
       const errorMessage: Message = {
         id: Date.now().toString(),
-        content: 'Please keep your message under 500 characters.',
+        content: validation.error || 'Invalid message',
         isUser: false,
         timestamp: new Date()
       }
@@ -534,9 +579,11 @@ export default function ChatInterface() {
       return
     }
 
+    const sanitizedInput = validation.sanitized
+
     const userMessage: Message = {
       id: Date.now().toString(),
-      content: input.trim(),
+      content: sanitizedInput,
       isUser: true,
       timestamp: new Date()
     }
@@ -544,22 +591,24 @@ export default function ChatInterface() {
     setMessages(prev => [...prev, userMessage])
     setInput('')
     setIsLoading(true)
-    
+
     // Show typing indicator with natural delay
     setIsTyping(true)
 
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: input.trim(), messages })
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-
-      const data = await response.json()
+      const data = await fetchJsonWithRetry<{ response: string; error?: string }>(
+        '/api/chat',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: sanitizedInput, messages: messagesRef.current })
+        },
+        {
+          maxRetries: API_CONFIG.RETRY_ATTEMPTS,
+          initialDelay: API_CONFIG.RETRY_INITIAL_DELAY,
+          retryableStatusCodes: API_CONFIG.RETRYABLE_STATUS_CODES
+        }
+      )
 
       if (data.error) {
         throw new Error(data.error)
@@ -614,7 +663,7 @@ export default function ChatInterface() {
       setIsLoading(false)
       setIsTyping(false)
     }
-  }, [input, messages, isLoading, analyzeUserLevel, updateDailyStreak, userLevel])
+  }, [input, isLoading, analyzeUserLevel, updateDailyStreak, userLevel])
 
   const clearChat = () => {
     const welcomeMessage: Message = {
@@ -624,7 +673,7 @@ export default function ChatInterface() {
       timestamp: new Date()
     }
     setMessages([welcomeMessage])
-    localStorage.removeItem('chinese-tutor-messages')
+    localStorage.removeItem(STORAGE_KEYS.MESSAGES)
     // Keep learned words when clearing chat
   }
 
@@ -752,7 +801,7 @@ export default function ChatInterface() {
     if (detectedTopics.length > 0) {
       setConversationTopics(prev => {
         const newTopics = [...new Set([...detectedTopics, ...prev])].slice(0, 5)
-        localStorage.setItem('chinese-tutor-topics', JSON.stringify(newTopics))
+        setItemSafe(STORAGE_KEYS.TOPICS, newTopics)
         return newTopics
       })
     }
@@ -797,7 +846,7 @@ export default function ChatInterface() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [input, sendMessage, askForCorrection, askForExplanation])
+  }, [sendMessage, askForCorrection, askForExplanation])
 
   return (
     <div className="bg-gradient-to-br from-red-50 to-yellow-50 rounded-xl shadow-xl border border-red-100 h-[700px] sm:h-[600px] md:h-[700px] lg:h-[800px] flex flex-col">
@@ -828,26 +877,42 @@ export default function ChatInterface() {
       )}
 
       {/* Progress and Level indicator */}
-      <div className="px-4 sm:px-6 py-3 border-b border-red-100 bg-gradient-to-r from-red-100/50 to-yellow-100/50">
+      <div
+        className="px-4 sm:px-6 py-3 border-b border-red-100 bg-gradient-to-r from-red-100/50 to-yellow-100/50"
+        role="region"
+        aria-label="Learning progress and statistics"
+      >
         <div className="flex items-center justify-between text-sm">
           <div className="flex items-center gap-3">
             <span className="text-red-800 font-medium">Progress</span>
-            <span className="bg-red-200 px-2 py-1 rounded-full text-red-800 font-medium">
+            <span
+              className="bg-red-200 px-2 py-1 rounded-full text-red-800 font-medium"
+              aria-label={`You have learned ${wordsLearned.size} words`}
+            >
               {wordsLearned.size} words learned
             </span>
             {dailyStreak > 0 && (
-              <span className="bg-orange-200 px-2 py-1 rounded-full text-orange-800 font-medium">
+              <span
+                className="bg-orange-200 px-2 py-1 rounded-full text-orange-800 font-medium"
+                aria-label={`${dailyStreak} day practice streak`}
+              >
                 🔥 {dailyStreak} day streak
               </span>
             )}
             {userLevel && (
-              <span className="bg-blue-200 px-2 py-1 rounded-full text-blue-800 font-medium capitalize">
+              <span
+                className="bg-blue-200 px-2 py-1 rounded-full text-blue-800 font-medium capitalize"
+                aria-label={`Your level is ${userLevel.level}, HSK level ${userLevel.hskLevel}`}
+              >
                 {userLevel.level} • HSK {userLevel.hskLevel}
               </span>
             )}
           </div>
           {userLevel && (
-            <div className="text-xs text-gray-600">
+            <div
+              className="text-xs text-gray-600"
+              aria-label={`Assessment confidence level ${Math.round(userLevel.confidence * 100)} percent`}
+            >
               Confidence: {Math.round(userLevel.confidence * 100)}%
             </div>
           )}
@@ -894,105 +959,20 @@ export default function ChatInterface() {
           </div>
         </div>
       )}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 sm:space-y-4">
-        {messages.map((message) => {
-          const getMessageStyle = () => {
-            if (message.isUser) {
-              return 'bg-gradient-to-r from-blue-500 to-blue-600 text-white'
-            }
-            
-            switch (message.messageType) {
-              case 'correction':
-                return 'bg-gradient-to-r from-red-50 to-orange-50 text-gray-800 border border-red-200'
-              case 'encouragement':
-                return 'bg-gradient-to-r from-green-50 to-emerald-50 text-gray-800 border border-green-200'
-              case 'cultural':
-                return 'bg-gradient-to-r from-purple-50 to-violet-50 text-gray-800 border border-purple-200'
-              case 'grammar':
-                return 'bg-gradient-to-r from-blue-50 to-indigo-50 text-gray-800 border border-blue-200'
-              default:
-                return 'bg-white text-gray-800 border border-gray-200'
-            }
-          }
-
-          const getMessageIcon = () => {
-            switch (message.messageType) {
-              case 'correction': return '✏️'
-              case 'encouragement': return '🎉'
-              case 'cultural': return '🏮'
-              case 'grammar': return '📝'
-              default: return '🤖'
-            }
-          }
-
-          return (
-            <div key={message.id} className="space-y-2">
-              <div className={`flex ${message.isUser ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[280px] sm:max-w-xs lg:max-w-md px-3 sm:px-4 py-2 sm:py-3 rounded-xl shadow-sm ${getMessageStyle()}`}>
-                  {!message.isUser && message.messageType !== 'normal' && (
-                    <div className="flex items-center gap-1 mb-2 text-xs font-medium opacity-80">
-                      <span>{getMessageIcon()}</span>
-                      <span className="capitalize">{message.messageType}</span>
-                    </div>
-                  )}
-                  <div className="text-sm leading-relaxed font-medium">
-                    {message.content.split('\n').map((line, index) => {
-                      // Check if line contains Chinese characters
-                      const chineseMatch = line.match(/[\u4e00-\u9fff]+(\s*\([^)]+\))?/g)
-                      if (chineseMatch && !message.isUser) {
-                        return (
-                          <p key={index} className="mb-1">
-                            {line.split(/([\u4e00-\u9fff]+(\s*\([^)]+\))?)/g).map((part, partIndex) => {
-                              const isChinesePart = /[\u4e00-\u9fff]+(\s*\([^)]+\))?/.test(part)
-                              if (isChinesePart) {
-                                const chineseOnly = part.replace(/\s*\([^)]+\)/g, '')
-                                return (
-                                  <span
-                                    key={partIndex}
-                                    className="inline-flex items-center gap-1 bg-red-50 px-1 py-0.5 rounded border border-red-200 cursor-pointer hover:bg-red-100 transition-colors"
-                                    onClick={() => speakChinese(chineseOnly)}
-                                    title="Click to hear pronunciation"
-                                  >
-                                    {part}
-                                    <span className="text-xs">🔊</span>
-                                  </span>
-                                )
-                              }
-                              return <span key={partIndex}>{part}</span>
-                            })}
-                          </p>
-                        )
-                      }
-                      return <p key={index} className="mb-1">{line}</p>
-                    })}
-                  </div>
-                  <p className="text-xs mt-1 opacity-70">
-                    {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                </div>
-              </div>
-              
-              {/* Smart Follow-up Suggestions */}
-              {!message.isUser && message.suggestions && message.suggestions.length > 0 && (
-                <div className="flex justify-start">
-                  <div className="max-w-[280px] sm:max-w-xs lg:max-w-md ml-2">
-                    <div className="flex flex-wrap gap-1.5">
-                      {message.suggestions.map((suggestion, idx) => (
-                        <button
-                          key={idx}
-                          onClick={() => handleSuggestionClick(suggestion)}
-                          className="px-2.5 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-full transition-colors border border-blue-200 font-medium"
-                        >
-                          {suggestion}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )
-        })}
+      <div
+        className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 sm:space-y-4"
+        role="log"
+        aria-live="polite"
+        aria-label="Chat conversation"
+      >
+        {messages.map((message) => (
+          <MessageBubble
+            key={message.id}
+            message={message}
+            onSpeakChinese={speakChinese}
+            onSuggestionClick={handleSuggestionClick}
+          />
+        ))}
         {(isLoading || isTyping) && (
           <div className="flex justify-start">
             <div className="bg-white border border-gray-200 text-gray-900 max-w-xs lg:max-w-md px-4 py-3 rounded-xl shadow-sm">
@@ -1101,7 +1081,7 @@ export default function ChatInterface() {
           </button>
         </div>
         
-        <div className="flex space-x-1.5 sm:space-x-2">
+        <div className="flex space-x-1.5 sm:space-x-2" role="form" aria-label="Message input form">
           <input
             type="text"
             value={input}
@@ -1110,18 +1090,23 @@ export default function ChatInterface() {
             placeholder="Type your message, speak Chinese, or record..."
             className="flex-1 border border-red-200 rounded-xl px-3 sm:px-4 py-2.5 sm:py-3 focus:outline-none focus:ring-2 focus:ring-red-300 focus:border-red-300 bg-white shadow-sm font-medium text-sm sm:text-base"
             disabled={isLoading}
-            maxLength={500}
+            maxLength={INPUT_CONSTRAINTS.MAX_MESSAGE_LENGTH}
             aria-label="Type your message to the Chinese tutor"
+            aria-describedby="input-hint"
           />
+          <span id="input-hint" className="sr-only">
+            Press Enter to send, or use voice recording
+          </span>
           {speechSupported && (
             <button
               onClick={isListening ? stopListening : startListening}
               disabled={isLoading}
               className={`px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl focus:outline-none focus:ring-2 transition-all duration-200 shadow-sm font-medium text-sm sm:text-base ${
-                isListening 
-                  ? 'bg-gradient-to-r from-green-500 to-green-600 text-white hover:from-green-600 hover:to-green-700 focus:ring-green-300' 
+                isListening
+                  ? 'bg-gradient-to-r from-green-500 to-green-600 text-white hover:from-green-600 hover:to-green-700 focus:ring-green-300'
                   : 'bg-gradient-to-r from-purple-500 to-purple-600 text-white hover:from-purple-600 hover:to-purple-700 focus:ring-purple-300'
               } disabled:opacity-50 disabled:cursor-not-allowed`}
+              aria-label={isListening ? 'Stop recording voice message' : 'Start recording voice message'}
               title={isListening ? 'Stop recording (speak now!)' : 'Record voice message'}
             >
               {isListening ? '⏹️' : '🎤'}
@@ -1131,6 +1116,7 @@ export default function ChatInterface() {
             onClick={sendMessage}
             disabled={isLoading || !input.trim()}
             className="bg-gradient-to-r from-red-500 to-red-600 text-white px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl hover:from-red-600 hover:to-red-700 focus:outline-none focus:ring-2 focus:ring-red-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-sm font-medium text-sm sm:text-base"
+            aria-label="Send message"
             title="Keyboard shortcut: Ctrl+Enter"
           >
             Send
